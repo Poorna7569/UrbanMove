@@ -1,0 +1,74 @@
+# Docker Compose for local development and testing
+# In production, use AWS ECS Fargate with RDS instead
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database (simulates RDS in private subnet)
+  postgres:
+    image: postgres:15-alpine
+    container_name: urbanmove_db
+    environment:
+      POSTGRES_USER: urbanmove
+      POSTGRES_PASSWORD: urbanmove_pass
+      POSTGRES_DB: urbanmove_db
+      # PostgreSQL network: only accessible from backend container
+    ports:
+      # Only exposed for local development - NOT in production
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U urbanmove"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - urbanmove_network
+
+  # FastAPI Backend (simulates container in private subnet)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: urbanmove_backend
+    environment:
+      DATABASE_URL: postgresql://urbanmove:urbanmove_pass@postgres:5432/urbanmove_db
+      ENVIRONMENT: development
+      SECRET_KEY: dev-secret-key-change-in-production
+      ALLOWED_ORIGINS: "*"
+      AWS_REGION: us-east-1
+    ports:
+      # Simulates ALB forwarding traffic to backend on private subnet
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    command: >
+      sh -c "
+        echo 'Waiting for database...' &&
+        sleep 10 &&
+        python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    networks:
+      - urbanmove_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  urbanmove_network:
+    driver: bridge
+    # Simulates VPC network
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16

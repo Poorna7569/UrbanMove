@@ -33,7 +33,7 @@ services:
       dockerfile: Dockerfile
     container_name: urbanmove_backend
     environment:
-      DATABASE_URL: postgresql://urbanmove:urbanmove123@urbanmove-db.cr6m40awq563.eu-north-1.rds.amazonaws.com:5432/postgres
+      DATABASE_URL: postgresql://urbanmove:urbanmove123@urbanmove-db.cr6m40awq563.eu-north-1.rds.amazonaws.com:5432/urbanmove
       ENVIRONMENT: development
       SECRET_KEY: dev-secret-key-change-in-production
       ALLOWED_ORIGINS: "*"

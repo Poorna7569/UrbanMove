@@ -1,13 +1,18 @@
 """
 Database configuration module.
-Handles SQLAlchemy setup for PostgreSQL connection.
+Handles SQLAlchemy setup for AWS RDS PostgreSQL connection.
 
-Cloud Deployment Note:
-- In AWS, this connects to RDS PostgreSQL in the PRIVATE SUBNET
+Architecture:
+- In AWS ECS/Fargate: Connects to RDS PostgreSQL in the PRIVATE SUBNET
 - Database endpoint is only accessible from backend containers
 - Backend runs in containers behind the ALB (PUBLIC SUBNET)
 - Data flow: User → ALB (Public Subnet) → Backend (Private Subnet) → RDS (Private Subnet)
-- Database credentials are fetched from AWS Secrets Manager
+
+Database Credentials:
+- Retrieved from AWS Secrets Manager in production
+- DATABASE_URL environment variable is required
+- No local Docker fallback - RDS only
+- Credentials are never hardcoded
 """
 
 from sqlalchemy import create_engine
@@ -18,46 +23,40 @@ import json
 import boto3
 from botocore.exceptions import ClientError
 import logging
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
 
 def get_database_url():
     """
-    Retrieve DATABASE_URL from AWS Secrets Manager or fallback to environment variable.
+    Retrieve DATABASE_URL from AWS Secrets Manager or environment variable.
     
-    In AWS ECS/Fargate:
-    - Fetches secret "urbanmove-db-secret" from Secrets Manager
-    - Parses JSON to extract credentials
-    
-    In local/development:
-    - Falls back to DATABASE_URL environment variable
+    RDS-only configuration - no local Docker fallback.
     
     Returns:
         str: PostgreSQL connection URL
         
     Raises:
-        ValueError: If database credentials cannot be retrieved
+        RuntimeError: If DATABASE_URL cannot be obtained or is invalid
     """
     # Try AWS Secrets Manager first (production)
     try:
         secret_name = "urbanmove-db-secret"
-        region_name = "eu-north-1"
+        region_name = os.getenv("AWS_REGION", "eu-north-1")
         
         client = boto3.client("secretsmanager", region_name=region_name)
         
         try:
             response = client.get_secret_value(SecretId=secret_name)
         except ClientError as e:
-            if e.response["Error"]["Code"] == "ResourceNotFoundException":
-                logger.warning(f"Secret {secret_name} not found in AWS Secrets Manager")
+            error_code = e.response["Error"]["Code"]
+            if error_code == "ResourceNotFoundException":
+                logger.info(f"Secret {secret_name} not found - falling back to environment variable")
                 raise ValueError(f"Secret {secret_name} not found")
-            elif e.response["Error"]["Code"] == "InvalidRequestException":
-                logger.warning(f"Invalid request for secret {secret_name}")
+            elif error_code in ["InvalidRequestException", "InvalidParameterException"]:
+                logger.info(f"Invalid Secrets Manager request - falling back to environment variable")
                 raise ValueError(f"Invalid request for secret {secret_name}")
-            elif e.response["Error"]["Code"] == "InvalidParameterException":
-                logger.warning(f"Invalid parameter for secret {secret_name}")
-                raise ValueError(f"Invalid parameter for secret {secret_name}")
             else:
                 raise
         
@@ -84,27 +83,77 @@ def get_database_url():
         
         # Construct DATABASE_URL
         database_url = f"postgresql://{username}:{password}@{host}:{port}/{dbname}"
-        logger.info(f"Successfully retrieved database credentials from Secrets Manager for host: {host}")
+        logger.info(f"✓ Database credentials retrieved from AWS Secrets Manager")
+        logger.info(f"  RDS Host: {host}:{port}")
+        logger.info(f"  Database: {dbname}")
         return database_url
         
     except Exception as e:
-        logger.warning(f"Could not retrieve credentials from AWS Secrets Manager: {str(e)}")
-        logger.info("Attempting to use environment variable DATABASE_URL")
+        logger.info(f"AWS Secrets Manager unavailable: {str(e)}")
+        logger.info("Attempting to read DATABASE_URL from environment variable...")
         
-        # Fallback to environment variable (local development)
-        database_url = os.getenv(
-            "DATABASE_URL",
-            "postgresql://urbanmove:urbanmove_pass@postgres:5432/urbanmove_db"
-        )
+        # Fall back to environment variable
+        database_url = os.getenv("DATABASE_URL")
         
-        if database_url == "postgresql://urbanmove:urbanmove_pass@postgres:5432/urbanmove_db":
-            logger.warning("Using default database URL - this is insecure for production!")
+        if not database_url:
+            error_msg = (
+                "CRITICAL: DATABASE_URL environment variable is not set.\n"
+                "Application requires either:\n"
+                "1. AWS Secrets Manager secret 'urbanmove-db-secret', OR\n"
+                "2. DATABASE_URL environment variable\n"
+                "This application ONLY connects to AWS RDS - no local Docker database fallback."
+            )
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
         
+        logger.info("✓ DATABASE_URL retrieved from environment variable")
         return database_url
 
 
-# Retrieve database URL at module load time
-DATABASE_URL = get_database_url()
+def validate_database_url(url: str) -> None:
+    """
+    Validate that DATABASE_URL is properly formatted and points to RDS.
+    
+    Args:
+        url: PostgreSQL connection URL
+        
+    Raises:
+        ValueError: If URL is invalid or uses local/docker hostnames
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        raise ValueError(f"Invalid DATABASE_URL format: {str(e)}")
+    
+    # Check for local/docker hostnames
+    local_hostnames = ["localhost", "127.0.0.1", "postgres", "0.0.0.0"]
+    if parsed.hostname and parsed.hostname.lower() in local_hostnames:
+        raise ValueError(
+            f"Invalid DATABASE_URL: hostname '{parsed.hostname}' is a local/docker name. "
+            "This application ONLY connects to AWS RDS."
+        )
+    
+    # Check database name
+    db_path = parsed.path.lstrip("/")
+    if not db_path:
+        raise ValueError("DATABASE_URL must include database name (path)")
+    
+    logger.info(f"✓ DATABASE_URL validation passed")
+    logger.info(f"  Host: {parsed.hostname}")
+    logger.info(f"  Database: {db_path}")
+
+
+# Retrieve and validate DATABASE_URL at module load time
+try:
+    DATABASE_URL = get_database_url()
+    validate_database_url(DATABASE_URL)
+    logger.info("✓ Database configuration ready")
+except RuntimeError as e:
+    logger.critical(f"Failed to initialize database configuration: {str(e)}")
+    raise
+except ValueError as e:
+    logger.critical(f"Invalid database configuration: {str(e)}")
+    raise RuntimeError(f"Database configuration error: {str(e)}")
 
 # Create engine with NullPool for horizontal scalability
 # NullPool prevents connection pooling issues when scaling horizontally

@@ -8,11 +8,17 @@ services:
     container_name: urbanmove_backend
 
     environment:
+      # Database configuration - RDS only (no local Docker fallback)
+      DATABASE_URL: postgresql://urbanmove:urbanmove123@urbanmove-db.cr6m40awq563.eu-north-1.rds.amazonaws.com:5432/urbanmove
+      
+      # AWS configuration
       ENVIRONMENT: production
+      AWS_REGION: eu-north-1
+      
+      # API configuration
+      API_KEY: urbanmove123
       SECRET_KEY: dev-secret-key-change-in-production
       ALLOWED_ORIGINS: "*"
-      AWS_REGION: eu-north-1
-      API_KEY: urbanmove123
 
     ports:
       - "8000:8000"
@@ -22,7 +28,7 @@ services:
 
     command: >
       sh -c "
-        echo 'Starting backend with RDS (credentials from AWS Secrets Manager)...' &&
+        echo 'Starting UrbanMove Backend (RDS only configuration)...' &&
         python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
       "
 

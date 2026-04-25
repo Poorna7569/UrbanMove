@@ -7,7 +7,8 @@ All requests must include the "x-api-key" header with the correct value.
 Invalid or missing API keys result in HTTP 403 Forbidden responses.
 """
 
-from fastapi import Header, HTTPException, logging
+from fastapi import Header, HTTPException
+import logging
 import os
 
 logger = logging.getLogger(__name__)

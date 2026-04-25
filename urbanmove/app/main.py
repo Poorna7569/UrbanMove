@@ -64,9 +64,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
-logger.info("Database tables initialized")
+# Create database tables (with error handling for connection issues)
+try:
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables initialized successfully")
+except Exception as e:
+    logger.warning(f"Could not create database tables on startup: {str(e)}")
+    logger.info("Tables will be created on first request if needed")
 
 # Include routers
 app.include_router(health.router, prefix="/api/v1", tags=["health"])

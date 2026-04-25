@@ -38,6 +38,7 @@ services:
       SECRET_KEY: dev-secret-key-change-in-production
       ALLOWED_ORIGINS: "*"
       AWS_REGION: us-east-1
+      API_KEY: urbanmove123
     ports:
       # Simulates ALB forwarding traffic to backend on private subnet
       - "8000:8000"

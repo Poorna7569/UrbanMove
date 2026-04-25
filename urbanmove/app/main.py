@@ -29,7 +29,7 @@ Scalability:
 - ALB health checks drive auto-scaling decisions
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
@@ -38,6 +38,7 @@ import os
 # Import routes
 from app.routes import health, ingest, auth, route
 from app.database import engine, Base
+from app.auth.api_key import verify_api_key
 
 # Configure logging for CloudWatch
 logging.basicConfig(
@@ -50,7 +51,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="UrbanMove",
     description="Smart Mobility Platform - Real-time Route Optimization",
-    version="1.0.0"
+    version="1.0.0",
+    dependencies=[Depends(verify_api_key)]
 )
 
 # CORS configuration (restrict in production)

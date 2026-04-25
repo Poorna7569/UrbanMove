@@ -42,7 +42,7 @@ def get_database_url():
     # Try AWS Secrets Manager first (production)
     try:
         secret_name = "urbanmove-db-secret"
-        region_name = os.getenv("AWS_REGION", "us-east-1")
+        region_name = "eu-north-1"
         
         client = boto3.client("secretsmanager", region_name=region_name)
         

@@ -40,11 +40,20 @@ def get_database_url():
     Raises:
         RuntimeError: If DATABASE_URL cannot be obtained or is invalid
     """
-    # Try AWS Secrets Manager first (production)
+    # First check if DATABASE_URL is explicitly set in environment
+    # This is the primary method for ECS/Docker deployments
+    env_db_url = os.getenv("DATABASE_URL")
+    
+    if env_db_url:
+        logger.info("✓ DATABASE_URL found in environment variable")
+        return env_db_url
+    
+    # Try AWS Secrets Manager as fallback (for EC2 or local AWS CLI access)
     try:
         secret_name = "urbanmove-db-secret"
         region_name = os.getenv("AWS_REGION", "eu-north-1")
         
+        logger.info(f"DATABASE_URL not in environment, attempting AWS Secrets Manager...")
         client = boto3.client("secretsmanager", region_name=region_name)
         
         try:
@@ -52,10 +61,10 @@ def get_database_url():
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
             if error_code == "ResourceNotFoundException":
-                logger.info(f"Secret {secret_name} not found - falling back to environment variable")
+                logger.info(f"Secret {secret_name} not found in Secrets Manager")
                 raise ValueError(f"Secret {secret_name} not found")
             elif error_code in ["InvalidRequestException", "InvalidParameterException"]:
-                logger.info(f"Invalid Secrets Manager request - falling back to environment variable")
+                logger.info(f"Invalid request to Secrets Manager")
                 raise ValueError(f"Invalid request for secret {secret_name}")
             else:
                 raise
@@ -89,25 +98,17 @@ def get_database_url():
         return database_url
         
     except Exception as e:
-        logger.info(f"AWS Secrets Manager unavailable: {str(e)}")
-        logger.info("Attempting to read DATABASE_URL from environment variable...")
-        
-        # Fall back to environment variable
-        database_url = os.getenv("DATABASE_URL")
-        
-        if not database_url:
-            error_msg = (
-                "CRITICAL: DATABASE_URL environment variable is not set.\n"
-                "Application requires either:\n"
-                "1. AWS Secrets Manager secret 'urbanmove-db-secret', OR\n"
-                "2. DATABASE_URL environment variable\n"
-                "This application ONLY connects to AWS RDS - no local Docker database fallback."
-            )
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-        
-        logger.info("✓ DATABASE_URL retrieved from environment variable")
-        return database_url
+        error_msg = (
+            "CRITICAL: Cannot initialize database connection.\n"
+            "DATABASE_URL environment variable is not set, and AWS Secrets Manager is unavailable.\n"
+            "Application requires either:\n"
+            "1. DATABASE_URL environment variable (recommended for ECS/Docker), OR\n"
+            "2. AWS Secrets Manager secret 'urbanmove-db-secret' with proper IAM permissions\n"
+            "This application ONLY connects to AWS RDS - no local Docker database fallback.\n"
+            f"Error: {str(e)}"
+        )
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
 
 
 def validate_database_url(url: str) -> None:

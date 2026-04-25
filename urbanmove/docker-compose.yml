@@ -8,8 +8,9 @@ services:
     container_name: urbanmove_backend
 
     environment:
-      # Database configuration - RDS only (no local Docker fallback)
-      DATABASE_URL: postgresql://urbanmove:urbanmove123@urbanmove-db.cr6m40awq563.eu-north-1.rds.amazonaws.com:5432/urbanmove
+      # Database configuration - AWS RDS PostgreSQL
+      # This is the PRIMARY method for ECS/Docker deployments
+      DATABASE_URL: "postgresql://urbanmove:urbanmove123@urbanmove-db.cr6m40awq563.eu-north-1.rds.amazonaws.com:5432/urbanmove"
       
       # AWS configuration
       ENVIRONMENT: production
@@ -28,7 +29,10 @@ services:
 
     command: >
       sh -c "
-        echo 'Starting UrbanMove Backend (RDS only configuration)...' &&
+        echo '================================================'
+        echo 'Starting UrbanMove Backend'
+        echo 'Database: AWS RDS PostgreSQL (RDS only)'
+        echo '================================================' &&
         python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
       "
 
